@@ -111,7 +111,7 @@ begin = clock();
 //			printf("Printing to file %dtime:%lf\n",j,timearray[j]);
 		}
 
-		
+
 		writeTime(n,timearray,procs);
 	}
 
@@ -121,13 +121,13 @@ begin = clock();
 
 
 
-void writeTime(int n, double *timearray, int j)
+void writeTime(long int n, double *timearray, int j)
 {
   int i;
 
 // open file for writing
   char filename[100];
-  sprintf(filename, "time_%d",n);
+  sprintf(filename, "time_%ld",(int)n);
 
   FILE *fd;
   fd = fopen(filename, "w");
@@ -135,7 +135,7 @@ void writeTime(int n, double *timearray, int j)
 // write the image
   for(i = 0; i < j; i++)
   {
-    fprintf(fd, "%d\t%lf\n", i,timearray[i]);
+    fprintf(fd, "%d\t%le\n", i,timearray[i]);
   }
   fclose(fd);
 }
