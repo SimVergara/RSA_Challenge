@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <mpi.h>
 #include <math.h>
-#include <time.h>
 
 int nextprime(long int n);
+void writeTime(long int n, double *timearray, int j);
 
 int main(int argc, char** argv)
 {
@@ -27,7 +27,7 @@ int main(int argc, char** argv)
 	int 		done = 0,
 				found = 0;
 
-	clock_t		begin, end;
+	double		begin, end;
 	double 		time_spent;
 
 	MPI_Init(&argc, &argv);
@@ -35,13 +35,13 @@ int main(int argc, char** argv)
 	MPI_Comm_size(MPI_COMM_WORLD, &procs);
 
 
-begin = clock();
+begin = MPI_Wtime();
 
 	sqn = sqrt(n);
 	p = 1;
 	q = nextprime(sqn);
 	long int gap = (n/2)-sqn;
-	long int sdsd = log10(gap) -1;
+	long int sdsd = log10(gap) -2;
 
 	mag = (int) pow((double)10,(double)sdsd);
 
@@ -59,6 +59,9 @@ begin = clock();
 //for (int i=0;i<=mag;i++)
 //	printf("k[%d]=%d\n", i,k[i]);
 
+
+int counter=0;
+//printf("mag%d\n",mag);
 
 
 	for (int i=my_rank; i<mag; i=i+procs)
@@ -79,10 +82,14 @@ begin = clock();
 				p=1;
 				q=nextprime(q);
 			}
+
+			counter++;
+			if (counter%250==0) MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 		}//done finding primes
 
-		MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+		
 		if (found || done) break;
+		
 	}
 
 	if (found)
@@ -91,9 +98,12 @@ begin = clock();
 	}
 	/*else
 		printf("P%d: Numbers not found\n",my_rank);*/
-	end = clock();
+	end = MPI_Wtime();
 
-	time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+
+
+
+	time_spent = (double)(end - begin);
 
 	if (my_rank!=0)
 	{
