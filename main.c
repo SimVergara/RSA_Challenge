@@ -4,8 +4,8 @@
 #include <mpi.h>
 #include <math.h>
 
-int nextprime(long int n);
-void writeTime(long int n, double *timearray, int j);
+
+void writeTime(char *n, double *timearray, int j);
 
 int main(int argc, char** argv)
 {
@@ -14,16 +14,22 @@ int main(int argc, char** argv)
 
 	MPI_Status	status;
 
-	int 		q,
+	mpz_t 		q,
 				p,
-				sqn;
+				pq,
+				n,
+				gap,
+				sqn,
+				halfn,
+				kiplusone;
 
-	int			*k;
+	mpz_t			*k;
 
 	double 		*timearray;
 
-	long int 	mag;
-	long int 	n = atoi(argv[1]);
+	
+	char 		*ptr;
+	long int 	N = strtol(argv[1],&ptr,10);
 	int 		done = 0,
 				found = 0;
 
@@ -35,79 +41,138 @@ int main(int argc, char** argv)
 	MPI_Comm_size(MPI_COMM_WORLD, &procs);
 
 
-begin = MPI_Wtime();
+	begin = MPI_Wtime();
 
-	sqn = sqrt(n);
-	p = 1;
-	q = nextprime(sqn);
-	long int gap = (n/2)-sqn;
-	long int sdsd = log10(gap) -2;
+	mpz_init(n);
+	mpz_init(q);
+	mpz_init(p);
+	mpz_init(pq);
+	mpz_init(sqn);
+	mpz_init(halfn);
+	mpz_init(gap);
+	mpz_init(kiplusone);
 
-	mag = (int) pow((double)10,(double)sdsd);
+if(!my_rank) printf("N=%ld\n", N);
+	mpz_set_d(n,N);
+if(!my_rank) gmp_printf("n=%Zd\n",n);
+	mpz_set_ui(halfn,2);
+	mpz_sqrt(sqn,n);
+if(!my_rank) gmp_printf("sqn:%Zd\n", sqn);
+	mpz_tdiv_q(halfn,n,halfn);
+	mpz_set(gap, sqn);
+if(!my_rank) gmp_printf("gap:%Zd\n", gap);
 
-	k = (int*)malloc(sizeof(int)*mag);
+	mpz_set_ui(p,1);
+	mpz_nextprime(q, p);
 
-	for (int i=0;i<mag;i++)
+
+	size_t mag = mpz_sizeinbase (gap, 10);
+	mag=mag*procs;
+
+if(!my_rank) printf("mag:%zu\n", mag);
+
+
+
+	k = (mpz_t*)malloc(sizeof(mpz_t)*(mag+1));
+
+
+	
+
+	for (int i=0;i<=mag;i++)
 	{
-		k[i]=sqn + (i* (int)(gap/mag));
+		mpz_init(k[i]);
+		mpz_t temp;
+		mpz_init(temp);
+		mpz_tdiv_q_ui(temp,gap,mag);
+		mpz_mul_ui(k[i],temp,i);
+		//mpz_add(k[i],sqn,temp);
+		//k[i]=sqn + (i* (int)(gap/mag));
 	}
-	k[mag] = n/2;
+	//	k[mag] = n/2;
+	mpz_set(k[mag],sqn);
 
-
-//printf("log-1=%d,  	mag=%d\n",sdsd,mag);
-
-//for (int i=0;i<=mag;i++)
-//	printf("k[%d]=%d\n", i,k[i]);
-
+/*if (!my_rank){
+for (int i = 0; i<=mag; i++)
+	gmp_printf("k[%d]=%Zd\n",i,k[i]);
+}*/
 
 int counter=0;
 //printf("mag%d\n",mag);
 
 
-	for (int i=my_rank; i<mag; i=i+procs)
+	for (int i=my_rank; i<=mag; i=i+procs)
 	{
-//printf("P%d: i=%d\n", my_rank, i);
-		q=nextprime(k[i]-1);
+		mpz_sub_ui(kiplusone,k[i+1],1);
 
-		while ((q <= k[i+1])&&(!done)&&(!found))
+		mpz_set(q,k[i]);
+		mpz_sub_ui(q,q,1);
+		mpz_nextprime(q,q);//		q=nextprime(k[i]-1);
+
+//gmp_printf("i:%d p%Zd q%Zd\n", i,p,q);
+
+
+		while (( mpz_cmp(q,kiplusone) <= 0/*q <= k[i+1]*/  )&&(!done)&&(!found))
 		{//finding the prime numbers
-			p = nextprime(p);
+/*if (i==0)
+	gmp_printf("p%Zd q%Zd\n",p,q );
+*/
+			MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+			mpz_t temp;
+			mpz_mod(temp,n,q);
+			if (mpz_cmp_ui(temp,0)!=0) 
+			{
+				//gmp_printf("%Zd NOT DIVISIBLE BY %Zd\n", n,q);
+				mpz_nextprime(q,q);
+				continue;
+			}
+			mpz_nextprime(p,p);
 
-			if (p*q == n)
+			mpz_mul(pq,p,q);
+
+			if (mpz_cmp(pq,n)==0 /*p*q == n*/)
 			{
 				found = 1;
+				done=1;
 			}
-			else if ((p*q > n)||(p>q))
+			else if ( mpz_cmp(pq,n)>0/*(p*q > n)*/)// || mpz_cmp(p,q)>0/*(p>q)*/)
 			{
-				p=1;
-				q=nextprime(q);
+				mpz_set_ui(p,1);
+				mpz_nextprime(q,q);
 			}
 
 			counter++;
-			if (counter%250==0) MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 		}//done finding primes
 
 		
 		if (found || done) break;
 		
 	}
+	
+	end = MPI_Wtime();
 
 	if (found)
 	{
-		printf("P%d: Finished: p=%d q=%d\n", my_rank,p,q);
+		MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+		gmp_printf("P%d: Finished: p=%Zd q=%Zd*************************\n", my_rank,p,q);
+	}
+	else if (!done)
+	{
+		while (!done&&!found)
+		MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 	}
 	/*else
 		printf("P%d: Numbers not found\n",my_rank);*/
-	end = MPI_Wtime();
+	
 
 
-
+printf("P%d finished with done=%d found=%d.\n", my_rank, done, found);
 
 	time_spent = (double)(end - begin);
 
 	if (my_rank!=0)
 	{
-		MPI_Send(&time_spent, sizeof(double),MPI_INT,0,0,MPI_COMM_WORLD);
+		MPI_Send(&time_spent, sizeof(double),MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+//printf("P%d sent their time %le\n", my_rank, time_spent);
 	}
 	else
 	{
@@ -117,12 +182,12 @@ int counter=0;
 		int j; 
 		for (j = 1; j<procs;j++)
 		{
-			MPI_Recv(&timearray[j], sizeof(double),MPI_INT,j,0,MPI_COMM_WORLD,&status);
+			MPI_Recv(&timearray[j], sizeof(double),MPI_DOUBLE,j,0,MPI_COMM_WORLD,&status);
 //			printf("Printing to file %dtime:%lf\n",j,timearray[j]);
 		}
 
 
-		writeTime(n,timearray,procs);
+		writeTime(argv[1],timearray,procs);
 	}
 
 	MPI_Finalize();
@@ -131,13 +196,13 @@ int counter=0;
 
 
 
-void writeTime(long int n, double *timearray, int j)
+void writeTime(char *n, double *timearray, int j)
 {
   int i;
 
 // open file for writing
   char filename[100];
-  sprintf(filename, "time_%ld",(int)n);
+  sprintf(filename, "time_%s",n);
 
   FILE *fd;
   fd = fopen(filename, "w");
@@ -150,14 +215,3 @@ void writeTime(long int n, double *timearray, int j)
   fclose(fd);
 }
 
-
-
-int nextprime(long int n)
-{
-	mpz_t i;
-	mpz_init(i);
-	mpz_set_d(i,n);
-	mpz_nextprime(i, i);
-	long int k = mpz_get_d(i);
-	return k;
-}
