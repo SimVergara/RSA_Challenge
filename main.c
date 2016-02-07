@@ -20,21 +20,18 @@ int main(int argc, char** argv)
 				n,
 				gap,
 				sqn,
-				halfn,
 				kiplusone;
 
 	mpz_t			*k;
 
 	double 		*timearray;
-
+	double		begin, end;
+	double 		time_spent;
 	
 	char 		*ptr;
 	long int 	N = strtol(argv[1],&ptr,10);
 	int 		done = 0,
 				found = 0;
-
-	double		begin, end;
-	double 		time_spent;
 
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
@@ -48,17 +45,14 @@ int main(int argc, char** argv)
 	mpz_init(p);
 	mpz_init(pq);
 	mpz_init(sqn);
-	mpz_init(halfn);
 	mpz_init(gap);
 	mpz_init(kiplusone);
 
 if(!my_rank) printf("N=%ld\n", N);
-	mpz_set_d(n,N);
+	mpz_set_str(n,argv[1],10);
 if(!my_rank) gmp_printf("n=%Zd\n",n);
-	mpz_set_ui(halfn,2);
 	mpz_sqrt(sqn,n);
 if(!my_rank) gmp_printf("sqn:%Zd\n", sqn);
-	mpz_tdiv_q(halfn,n,halfn);
 	mpz_set(gap, sqn);
 if(!my_rank) gmp_printf("gap:%Zd\n", gap);
 
@@ -73,61 +67,99 @@ if(!my_rank) printf("mag:%zu\n", mag);
 
 
 
+
+
 	k = (mpz_t*)malloc(sizeof(mpz_t)*(mag+1));
 
 
+
+
 	
+	mpz_t temp;
+	mpz_init(temp);
+	mpz_tdiv_q_ui(temp,gap,mag);	
+
+//unsigned long int spacing = mpz_get_ui(temp);
 
 	for (int i=0;i<=mag;i++)
 	{
 		mpz_init(k[i]);
-		mpz_t temp;
-		mpz_init(temp);
-		mpz_tdiv_q_ui(temp,gap,mag);
 		mpz_mul_ui(k[i],temp,i);
+		//k[i] = spacing*i;
 	}
-	//	k[mag] = n/2;
+	//k[mag] = mpz_get_ui(sqn);;
 	mpz_set(k[mag],sqn);
 
 
-int counter=0;
+if (!my_rank){
+	for (int i =0;i<mag;i++)
+		gmp_printf("k[%d]=%Zd\n", i,k[i+1]);
+}
 
 
-	for (int i=my_rank; i<=mag; i=i+procs)
+
+	int counter=0;
+
+int tem=0;
+
+	for (int i=my_rank; i<mag; i=i+procs)
 	{
-		mpz_sub_ui(kiplusone,k[i+1],1);
+		//mpz_sub_ui(kiplusone,k[i+1],1);
 
 		mpz_set(q,k[i]);
+
 		mpz_sub_ui(q,q,1);
 		mpz_nextprime(q,q);
+gmp_printf("P%d n%Zd q%Zd\n", my_rank, n,q);
 
-
-		while (( mpz_cmp(q,kiplusone) <= 0/*q <= k[i+1]*/  )&&(!done)&&(!found))
+		while (( mpz_cmp(q,k[i+1]) <= 0 )&&(!done)&&(!found)&&(mpz_cmp(q,sqn)<=0))
 		{//finding the prime numbers
+			counter++;
+			if (counter%500==0)MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+if (counter%500==0)gmp_printf("q:%Zd k[%d+1]%Zd done%d, found%d\n", q,i,k[i+1],done,found);
 
-			MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-			
 			if (mpz_divisible_p(n,q)==0) 
-			{
+			{//if n is not divisible by q
+//gmp_printf("P%d found that %Zd is NOT divisible by %Zd\n", my_rank, n,q);
 				mpz_nextprime(q,q);
 				continue;
 			}
+if (tem==0)
+{
+gmp_printf("P%d found that %Zd is divisible by %Zd\n", my_rank, n,q);
+tem=1;
+}
+
+			//since it is divisible, try n/q and see if result is prime
+			mpz_divexact(p,n,q);
+			int reps;
+			if (mpz_probab_prime_p(p,reps)!=0)
+			{
+				found = 1;
+				done = 1;
+			}
+			else
+			{
+				mpz_nextprime(q,q);
+tem=0;
+			}
+			///end try
+/*
 			mpz_nextprime(p,p);
 
 			mpz_mul(pq,p,q);
 
-			if (mpz_cmp(pq,n)==0 /*p*q == n*/)
+			if (mpz_cmp(pq,n)==0)
 			{
 				found = 1;
 				done=1;
 			}
-			else if ( mpz_cmp(pq,n)>0/*(p*q > n)*/)
+			else if ( mpz_cmp(pq,n)>0)
 			{
 				mpz_set(p,q);
 				mpz_nextprime(q,q);
-			}
-
-			counter++;
+tem=0;
+			}*/
 		}//done finding primes
 
 		
@@ -147,7 +179,7 @@ int counter=0;
 	else if (!done)
 	{
 		while (!done&&!found)
-		MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+			MPI_Allreduce(&found, &done, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 	}
 
 
@@ -160,26 +192,32 @@ int counter=0;
 
 	if (my_rank!=0)
 	{
-		MPI_Send(&time_spent, sizeof(double),MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+printf("P%d sending\n", my_rank);
+		MPI_Send(&time_spent, sizeof(double),MPI_CHAR,0,0,MPI_COMM_WORLD);
+printf("P%d sent\n", my_rank);
 	}
 	else
 	{
 		timearray = (double*)malloc(sizeof(double)*procs);
+		
+		
 		timearray[0] = time_spent;
+
+
+printf("timearray[0]=%le\n", timearray[0]);
 
 		int j; 
 		for (j = 1; j<procs;j++)
 		{
-			MPI_Recv(&timearray[j], sizeof(double),MPI_DOUBLE,j,0,MPI_COMM_WORLD,&status);
-
+			double *ptr = timearray+j;
+			MPI_Recv(ptr, sizeof(double),MPI_CHAR,j,0,MPI_COMM_WORLD,&status);
+printf("timearray[%d]=%le\n", j,timearray[j]);
 		}
 
 
 		writeTime(argv[1],timearray,procs);
+		free(timearray);
 
-
-
-free(timearray);
 	}
 
 
